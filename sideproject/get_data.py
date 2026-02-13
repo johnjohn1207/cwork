@@ -2,7 +2,7 @@ import yfinance as yf
 
 # 設定你想下載的股號 (台股要加 .TW)
 # ticker = "2330.TW"  # 台積電
-ticker = "2330.TW"     # 輝達
+ticker = "8299.TWO"     # 輝達
 
 print(f"正在從 Yahoo Finance 下載 {ticker} 的數據...")
 

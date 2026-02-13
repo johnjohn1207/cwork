@@ -10,10 +10,20 @@ st.set_page_config(page_title="量化交易回測平台", page_icon="📈", layo
 
 # --- 2. Python 版備援策略 (確保雲端環境服務不中斷) ---
 def run_python_fallback(df):
-    """
-    當 Linux 雲端環境無法執行 Windows C++ 程式時，自動調用此 Python 邏輯。
-    """
     df = df.copy()
+    
+    # --- 關鍵修正：處理 Yahoo Finance 的多重索引格式 ---
+    if isinstance(df.columns, pd.MultiIndex):
+        # 降維：只保留第一層索引 (Open, Close 等)
+        df.columns = df.columns.get_level_values(0)
+    
+    # 確保 Close 欄位是單一的 Series 而非 DataFrame
+    if isinstance(df['Close'], pd.DataFrame):
+        close_series = df['Close'].iloc[:, 0]
+    else:
+        close_series = df['Close']
+        
+    df['Close'] = pd.to_numeric(close_series, errors='coerce')
     # 確保 Close 欄位是數值型態，避免 API 抓取的格式問題
     df['Close'] = pd.to_numeric(df['Close'], errors='coerce')
     df['MA5'] = df['Close'].rolling(window=5).mean()

@@ -185,22 +185,36 @@ if st.session_state.is_trained:
     st.pyplot(fig)
 
     # 預測明天
+    # --- 預測明天 (雲端部屬防呆版) ---
     feature_count = scaled_data.shape[1] 
-    last_window = torch.from_numpy(scaled_data[-look_back:]).float().view(1, look_back, feature_count).to(device)
+    last_window_data = scaled_data[-look_back:]
+    last_window_tensor = torch.from_numpy(last_window_data).float().view(1, look_back, feature_count).to(device)
     
+    model.eval()
     with torch.no_grad():
-        next_return_raw = model(last_window).cpu().numpy()
+        next_pred_raw = model(last_window_tensor).cpu().numpy()
 
-    # 2. 透過原本的函數轉回實際數值 (注意：現在轉出來的是"報酬率")
-    next_return_val = get_inverse_price(next_return_raw)[0]
+    # 1. 轉回實際報酬率：確保只抓取第一個純數值
+    inv_pred = get_inverse_price(next_pred_raw)
+    next_return_val = float(np.array(inv_pred).flatten()[0])
     
-    # 3. 換算回絕對股價：今天的真實收盤價 * (1 + 預測報酬率)
-    last_actual_close = raw_close_prices[-1] 
+    # 2. 抓取最後一天的真實收盤價：同樣確保它是純數值
+    # .flatten() 能把任何多維陣列壓平，[ -1] 抓最後一個
+    last_actual_close = float(np.array(raw_close_prices).flatten()[-1])
+    
+    # 3. 換算預測收盤價
+    # 計算公式： $next\_price = last\_close \times (1 + next\_return)$
     next_price_val = last_actual_close * (1 + next_return_val)
 
-    # 4. 在畫面上同時顯示預測的「漲跌幅」與「目標價」
-    st.success(f"🔮 AI 預測下一個交易日報酬率為： **{next_return_val * 100:.2f}%**")
-    st.success(f"🎯 換算預測收盤價約為： **${float(next_price_val):.2f}**")
+    # 4. 顯示結果 (使用轉好的純 float 變數)
+    st.divider()
+    st.subheader("🔮 明日走勢預測")
+    col_p1, col_p2 = st.columns(2)
+    with col_p1:
+        st.metric("預測漲跌幅", f"{next_return_val * 100:.2f}%")
+    with col_p2:
+        # 直接使用計算好的數字，不再在 f-string 裡面包 float()
+        st.success(f"🎯 換算預測收盤價約為： **${next_price_val:.2f}**")
 
     # --- 7. 指標計算 (修正：僅針對測試集進行評估) ---
 
@@ -288,30 +302,33 @@ if st.session_state.is_trained:
 
     final_capital = capital
     total_return_pct = (final_capital / initial_capital - 1) * 100
-    final_capital_val = float(final_capital)
-    total_return_pct_val = float(total_return_pct)
+
     
     # === 修正：補上缺失的 strategy_returns ===
     equity_series = pd.Series(equity_curve)
     strategy_returns = equity_series.pct_change().fillna(0).values 
     
     # 計算夏普比率與最大回撤
-    sharpe_val = float((np.mean(strategy_returns) / (np.std(strategy_returns) + 1e-9)) * np.sqrt(252))
+    # 修正: np.mean/np.std 回傳型態，確保 sharpe_val 為純 float
+    # 再次修正: np.mean/np.std 回傳型態，item() 取純 float
+    mean_ret = np.mean(strategy_returns)
+    std_ret = np.std(strategy_returns) + 1e-9
+    if hasattr(mean_ret, 'item'):
+        mean_ret = mean_ret.item()
+    if hasattr(std_ret, 'item'):
+        std_ret = std_ret.item()
+    sharpe_val = mean_ret / std_ret * np.sqrt(252)
 
 # 如果計算結果是 NaN (例如沒交易)，給它一個 0.0
     if np.isnan(sharpe_val):
         sharpe_val = 0.0
     rolling_max = equity_series.cummax()
     drawdown = (equity_series - rolling_max) / rolling_max
-    max_drawdown = drawdown.min() * 100
-    max_drawdown_val = float(max_drawdown)
-    
+    max_drawdown = drawdown.min() * 100    
     if len(trade_profits) > 0:
         win_rate = np.mean(np.array(trade_profits) > 0) * 100
     else:
         win_rate = 0
-    win_rate_val = float(win_rate)
-
     # --- 8. 在 Streamlit 上顯示儀表板 ---
     st.divider()
     st.header("📈 模型專業評估儀表板")
@@ -371,21 +388,28 @@ if st.session_state.is_trained:
         st.dataframe(trade_df)
     else:
         st.write("沒有產生交易訊號")
-    st.subheader("💰 策略最終結果")
+    # --- 修正：策略最終結果型態轉換 ---
+    # 使用 np.array(x).item() 就像是把多層包裝的禮物拆開，直到剩下核心的純數字
+    final_capital_val = float(np.array(final_capital).item())
+    total_return_pct_val = float(np.array(total_return_pct).item())
+    max_drawdown_val = float(np.array(max_drawdown).item())
+    win_rate_val = float(np.array(win_rate).item())
 
+    st.subheader("💰 策略最終結果")
     colA, colB = st.columns(2)
 
     with colA:
-    # 使用我們轉換後的純數字變數
+        # 顯示初始本金
         st.metric("初始本金", f"${initial_capital:,.0f}")
 
     with colB:
-    # 這裡就不會再報錯了！
+        # 顯示最終資金與總報酬變動
         st.metric(
             "最終資金", 
             f"${final_capital_val:,.0f}", 
             delta=f"{total_return_pct_val:.2f}%"
         )
+    
     col1, col2, col3 = st.columns(3)
 
     with col1:
@@ -395,7 +419,7 @@ if st.session_state.is_trained:
         st.metric("最大回撤 (MDD)", f"{max_drawdown_val:.2f}%")
 
     with col3:
-        st.metric("勝率 (Win Rate)", f"{win_rate_val:.2f}%")     
+        st.metric("勝率 (Win Rate)", f"{win_rate_val:.2f}%")  
     # --- 預測明天 (修正型態問題) ---
     feature_count = scaled_data.shape[1] 
     last_window_data = scaled_data[-look_back:]

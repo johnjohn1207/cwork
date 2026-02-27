@@ -363,13 +363,29 @@ if st.session_state.is_trained:
     st.subheader("💰 AI 策略模擬累積收益率")
     
     # 修正：直接使用 y_test_actual 作為大盤對照組
-    cumulative_strategy = (1 + pd.Series(strategy_returns)).cumprod()
-    cumulative_actual = (1 + pd.Series(y_test_actual)).cumprod()
+
+    # Clean cumulative returns to ensure all values are finite
+    # Ensure inputs are 1D float arrays
+
+    # Ensure all elements are float scalars (not arrays)
+    def flatten_to_float(arr):
+        return np.array([float(x) if np.ndim(x) == 0 else float(np.asarray(x).flatten()[0]) for x in arr])
+
+    strategy_returns_clean = flatten_to_float(strategy_returns)
+    y_test_actual_clean = flatten_to_float(y_test_actual)
+
+    cumulative_strategy = (1 + pd.Series(strategy_returns_clean)).cumprod()
+    cumulative_strategy = pd.Series(cumulative_strategy).replace([np.inf, -np.inf], np.nan).ffill().fillna(1.0)
+    cumulative_strategy = np.asarray(cumulative_strategy).astype(float).flatten()
+
+    cumulative_actual = (1 + pd.Series(y_test_actual_clean)).cumprod()
+    cumulative_actual = pd.Series(cumulative_actual).replace([np.inf, -np.inf], np.nan).ffill().fillna(1.0)
+    cumulative_actual = np.asarray(cumulative_actual).astype(float).flatten()
 
     fig_perf, ax_perf = plt.subplots(figsize=(10, 4))
     # 讓兩條線都從 1.0 開始（代表 100% 原始本金）
-    ax_perf.plot(cumulative_actual.values, label="Market Return (Buy & Hold)", color="gray", alpha=0.5)
-    ax_perf.plot(cumulative_strategy.values, label="AI Strategy Return", color="gold", linewidth=2)
+    ax_perf.plot(cumulative_actual, label="Market Return (Buy & Hold)", color="gray", alpha=0.5)
+    ax_perf.plot(cumulative_strategy, label="AI Strategy Return", color="gold", linewidth=2)
     ax_perf.axhline(y=1.0, color='black', linestyle='--', alpha=0.3) # 增加一條 1.0 的基準線
     ax_perf.legend()
     ax_perf.set_ylabel("Cumulative Return (Multiple)")
@@ -432,8 +448,8 @@ if st.session_state.is_trained:
     # get_inverse_price 回傳的是陣列，[0] 取出第一個，.item() 確保它是純數字
     next_return_val = float(get_inverse_price(next_pred_raw)[0])
     # 2. 抓取最後一天的真實收盤價，同樣確保它是純數字
-    # raw_close_prices[-1] 有時會是個陣列，用 .item() 最保險
-    last_actual_close = float(raw_close_prices[-1]) 
+    # raw_close_prices[-1] 有時會是個陣列，強制轉成純 float
+    last_actual_close = float(np.asarray(raw_close_prices[-1]).flatten()[0])
     # 3. 換算預測收盤價
     next_price_val = last_actual_close * (1 + next_return_val)
 
